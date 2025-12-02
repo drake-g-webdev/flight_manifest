@@ -1,0 +1,381 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Aviation operators (airlines/air services)
+model Operator {
+  id           Int      @id @default(autoincrement())
+  code         String   @unique // e.g., "WAI", "WRB"
+  name         String   // e.g., "Wright Air", "Warbelow's Air"
+  shortName    String?  @map("short_name") // Display name for UI
+  dotNumber    String?  @map("dot_number") // DOT certificate number
+  airCarrier   String?  @map("air_carrier") // Part 135 certificate
+  logoUrl      String?  @map("logo_url")
+  primaryColor String?  @map("primary_color") // For UI theming
+  isActive     Boolean  @default(true) @map("is_active")
+  address      String?
+  phone        String?
+  email        String?
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  stations    Station[]
+  aircraft    Aircraft[]
+  flights     Flight[]
+  passengers  Passenger[]
+  freight     Freight[]
+  mail        MailManifest[]
+  users       User[]
+  manifests   Manifest[]
+
+  @@map("operators")
+}
+
+// Base stations/locations
+model Station {
+  id           Int      @id @default(autoincrement())
+  code         String   // e.g., "FAI", "BRW" - unique per operator
+  name         String   // e.g., "Fairbanks", "Barrow"
+  icao         String?  // ICAO code if applicable (PAFA, PABR)
+  timezone     String   @default("America/Anchorage")
+  isActive     Boolean  @default(true) @map("is_active")
+  isMainBase   Boolean  @default(false) @map("is_main_base") // Primary maintenance base
+  address      String?
+  phone        String?
+  notes        String?
+  operatorId   Int      @map("operator_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  operator     Operator    @relation(fields: [operatorId], references: [id])
+  aircraft     Aircraft[]  // Aircraft currently at this station
+  users        User[]      // Users assigned to this station
+  flightsFrom  Flight[]    @relation("FlightOriginStation")
+
+  @@unique([operatorId, code])
+  @@index([operatorId])
+  @@map("stations")
+}
+
+// Aircraft configuration with W&B parameters
+model Aircraft {
+  id                    Int      @id @default(autoincrement())
+  tail                  String   @unique
+  type                  String   // e.g., C208, PC-12
+  maxTakeoffKg          Decimal  @map("max_takeoff_kg")
+  emptyWeightKg         Decimal  @map("empty_weight_kg")
+  emptyWeightArm        Decimal  @map("empty_weight_arm") @default(0)
+  pilotStandardWeightKg Decimal  @default(90) @map("pilot_standard_weight_kg")
+  pilotArm              Decimal  @map("pilot_arm") @default(1.2)
+  cgLimits              Json     @map("cg_limits") // { "cg_min": 22.0, "cg_max": 29.0 }
+  seatConfiguration     Json     @map("seat_configuration") // [{ "seat": 1, "arm": 1.5, "maxWeightKg": 130 }]
+  baggageCompartments   Json     @map("baggage_compartments") // [{ "name": "A", "capacityKg": 200, "arm": 2.9 }]
+  fuelTankArm           Decimal  @map("fuel_tank_arm") @default(1.8)
+  seats                 Int
+  isActive              Boolean  @default(true) @map("is_active")
+  notes                 String?
+
+  // Maintenance tracking
+  maintenanceStatus     MaintenanceStatus @default(OPERATIONAL) @map("maintenance_status")
+  lastInspectionDate    DateTime? @map("last_inspection_date")
+  nextInspectionDue     DateTime? @map("next_inspection_due")
+  totalFlightHours      Decimal   @default(0) @map("total_flight_hours")
+  hoursToNextService    Decimal?  @map("hours_to_next_service")
+  maintenanceNotes      String?   @map("maintenance_notes")
+
+  // Station/location tracking
+  currentStationId      Int?      @map("current_station_id")
+  homeStationId         Int?      @map("home_station_id") // Where aircraft is based
+
+  // Operator
+  operatorId            Int       @map("operator_id")
+
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  operator        Operator  @relation(fields: [operatorId], references: [id])
+  currentStation  Station?  @relation(fields: [currentStationId], references: [id])
+  flights         Flight[]
+  maintenanceLogs MaintenanceLog[]
+
+  @@index([operatorId])
+  @@index([currentStationId])
+  @@map("aircraft")
+}
+
+enum MaintenanceStatus {
+  OPERATIONAL
+  SCHEDULED_MAINTENANCE
+  IN_MAINTENANCE
+  AOG           // Aircraft on Ground (unscheduled)
+  INSPECTION_DUE
+}
+
+// Maintenance log entries
+model MaintenanceLog {
+  id            Int               @id @default(autoincrement())
+  aircraftId    Int               @map("aircraft_id")
+  type          MaintenanceType
+  description   String
+  performedBy   String?           @map("performed_by")
+  performedAt   DateTime          @map("performed_at")
+  hoursAtService Decimal?         @map("hours_at_service")
+  cost          Decimal?
+  nextDueHours  Decimal?          @map("next_due_hours")
+  nextDueDate   DateTime?         @map("next_due_date")
+  workOrderNumber String?         @map("work_order_number")
+  notes         String?
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  aircraft      Aircraft          @relation(fields: [aircraftId], references: [id])
+
+  @@index([aircraftId])
+  @@index([performedAt])
+  @@map("maintenance_logs")
+}
+
+enum MaintenanceType {
+  ANNUAL_INSPECTION
+  HUNDRED_HOUR
+  PHASE_CHECK
+  UNSCHEDULED
+  AD_COMPLIANCE    // Airworthiness Directive
+  SB_COMPLIANCE    // Service Bulletin
+  COMPONENT_REPLACEMENT
+  OIL_CHANGE
+  TIRE_CHANGE
+  OTHER
+}
+
+// Flight schedule
+model Flight {
+  id              Int       @id @default(autoincrement())
+  flightDate      DateTime  @map("flight_date") @db.Date
+  flightNumber    String?   @map("flight_number")
+  origin          String
+  originStationId Int?      @map("origin_station_id") // Links to Station
+  departureTime   DateTime? @map("departure_time")
+  route           Json      // [{ "leg": 1, "to": "VillageA", "eta": "09:10" }]
+  tailId          Int       @map("tail_id")
+  pilotName       String?   @map("pilot_name")
+  pilotWeightKg   Decimal?  @map("pilot_weight_kg")
+  fuelWeightKg    Decimal?  @map("fuel_weight_kg")
+  status          FlightStatus @default(DRAFT)
+  notes           String?
+  operatorId      Int       @map("operator_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  operator      Operator     @relation(fields: [operatorId], references: [id])
+  originStation Station?     @relation("FlightOriginStation", fields: [originStationId], references: [id])
+  aircraft      Aircraft     @relation(fields: [tailId], references: [id])
+  passengers    Passenger[]
+  freight       Freight[]
+  mail          MailManifest[]
+  assignments   Assignment[]
+  manifests     Manifest[]
+
+  @@index([operatorId])
+  @@index([flightDate])
+  @@index([status])
+  @@index([originStationId])
+  @@map("flights")
+}
+
+enum FlightStatus {
+  DRAFT
+  SCHEDULED
+  DEPARTED
+  CANCELLED
+}
+
+// Passenger bookings
+model Passenger {
+  id                 Int             @id @default(autoincrement())
+  bookingRef         String?         @map("booking_ref")
+  name               String
+  phone              String?
+  weightKg           Decimal?        @map("weight_kg")
+  standardWeightUsed Boolean         @default(true) @map("standard_weight_used")
+  bagsKg             Decimal         @default(0) @map("bags_kg")
+  destination        String
+  priority           PassengerPriority @default(NORMAL)
+  seatNumber         Int?            @map("seat_number")
+  flightId           Int?            @map("flight_id")
+  notes              String?
+
+  // Weight ticket integration
+  weightTicketPath   String?         @map("weight_ticket_path") // Path to uploaded weight ticket image
+  weightTicketDate   DateTime?       @map("weight_ticket_date") // When weight was recorded
+  checkedInAt        DateTime?       @map("checked_in_at")      // Check-in timestamp
+  checkedInBy        String?         @map("checked_in_by")      // Who performed check-in
+
+  operatorId         Int             @map("operator_id")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  operator    Operator     @relation(fields: [operatorId], references: [id])
+  flight      Flight?      @relation(fields: [flightId], references: [id])
+
+  @@index([operatorId])
+  @@index([flightId])
+  @@index([destination])
+  @@map("passengers")
+}
+
+enum PassengerPriority {
+  NORMAL
+  MEDICAL
+  EVAC
+  FIRST_CLASS
+}
+
+// Freight items
+model Freight {
+  id               Int             @id @default(autoincrement())
+  waybill          String?
+  description      String?
+  weightKg         Decimal         @map("weight_kg")
+  destination      String
+  volumeM3         Decimal?        @map("volume_m3")
+  priority         FreightPriority @default(STANDARD)
+  compartment      String?         // Which compartment it's assigned to
+  assignedFlightId Int?            @map("assigned_flight_id")
+  notes            String?
+  operatorId       Int             @map("operator_id")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  operator       Operator     @relation(fields: [operatorId], references: [id])
+  assignedFlight Flight?      @relation(fields: [assignedFlightId], references: [id])
+
+  @@index([operatorId])
+  @@index([assignedFlightId])
+  @@index([destination])
+  @@map("freight")
+}
+
+enum FreightPriority {
+  BYPASS
+  PRIORITY
+  STANDARD
+}
+
+// Mail manifest (USPS)
+model MailManifest {
+  id               Int             @id @default(autoincrement())
+  village          String
+  pounds           Decimal
+  weightKg         Decimal         @map("weight_kg") // Converted from pounds
+  priority         FreightPriority @default(BYPASS)
+  assignedFlightId Int?            @map("assigned_flight_id")
+  notes            String?
+  operatorId       Int             @map("operator_id")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  operator       Operator     @relation(fields: [operatorId], references: [id])
+  assignedFlight Flight?      @relation(fields: [assignedFlightId], references: [id])
+
+  @@index([operatorId])
+  @@index([assignedFlightId])
+  @@map("mail_manifest")
+}
+
+// Assignment audit trail (polymorphic - no FK constraints on resourceId)
+model Assignment {
+  id           Int      @id @default(autoincrement())
+  flightId     Int      @map("flight_id")
+  resourceType ResourceType @map("resource_type")
+  resourceId   Int      @map("resource_id")
+  createdBy    String   @map("created_by") // user ID or 'auto'
+  reason       String?  // Why this assignment was made
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  flight     Flight        @relation(fields: [flightId], references: [id])
+
+  @@index([flightId])
+  @@index([resourceType, resourceId])
+  @@map("assignments")
+}
+
+enum ResourceType {
+  PASSENGER
+  FREIGHT
+  MAIL
+}
+
+// Generated manifests
+model Manifest {
+  id           Int      @id @default(autoincrement())
+  flightId     Int      @map("flight_id")
+  manifestJson Json     @map("manifest_json")
+  pdfPath      String?  @map("pdf_path")
+  generatedBy  String   @map("generated_by") // 'auto', 'baseline', or user ID
+  version      Int      @default(1)
+  isActive     Boolean  @default(true) @map("is_active")
+  signedBy     String?  @map("signed_by")
+  signedAt     DateTime? @map("signed_at")
+  operatorId   Int      @map("operator_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  operator Operator @relation(fields: [operatorId], references: [id])
+  flight   Flight   @relation(fields: [flightId], references: [id])
+
+  @@index([operatorId])
+  @@index([flightId])
+  @@index([createdAt])
+  @@map("manifests")
+}
+
+// Users for authentication
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  role         UserRole @default(OPS)
+  stationId    Int?     @map("station_id") // User's assigned station
+  operatorId   Int?     @map("operator_id") // Null = super admin (can access all operators)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  operator     Operator? @relation(fields: [operatorId], references: [id])
+  station      Station?  @relation(fields: [stationId], references: [id])
+
+  @@index([operatorId])
+  @@index([stationId])
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  OPS
+  PILOT
+}
+
+// Optimization run logs (for audit and debugging)
+model OptimizationLog {
+  id             Int      @id @default(autoincrement())
+  runDate        DateTime @map("run_date") @db.Date
+  inputPayload   Json     @map("input_payload")
+  claudeResponse Json?    @map("claude_response")
+  baselineResult Json?    @map("baseline_result")
+  finalResult    Json?    @map("final_result")
+  status         String   // 'success', 'infeasible', 'error'
+  errorMessage   String?  @map("error_message")
+  durationMs     Int?     @map("duration_ms")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([runDate])
+  @@map("optimization_logs")
+}
