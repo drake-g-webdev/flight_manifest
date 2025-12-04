@@ -102,9 +102,9 @@ export const operatorsApi = {
 
 // Stations
 export const stationsApi = {
-  list: async (includeInactive?: boolean) => {
+  list: async (includeInactive?: boolean, operatorId?: number) => {
     const res = await api.get<ApiResponse<StationWithCounts[]>>('/stations', {
-      params: { includeInactive },
+      params: { includeInactive, operatorId },
     });
     return res.data;
   },

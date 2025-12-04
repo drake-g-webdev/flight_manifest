@@ -15,6 +15,7 @@ import {
 import { stationsApi } from '../services/api';
 import type { StationWithCounts } from '../types';
 import { useAuthStore } from '../store/authStore';
+import { useOperatorStore } from '../store/operatorStore';
 
 const TIMEZONES = [
   'America/Anchorage',
@@ -29,6 +30,7 @@ const TIMEZONES = [
 
 export default function Stations() {
   const { user } = useAuthStore();
+  const { selectedOperator } = useOperatorStore();
   const isAdmin = user?.role === 'ADMIN';
 
   const [stations, setStations] = useState<StationWithCounts[]>([]);
@@ -48,13 +50,17 @@ export default function Stations() {
   });
 
   useEffect(() => {
-    loadStations();
-  }, [showInactive]);
+    if (selectedOperator) {
+      loadStations();
+    }
+  }, [showInactive, selectedOperator?.id]);
 
   const loadStations = async () => {
+    if (!selectedOperator) return;
+
     setLoading(true);
     try {
-      const res = await stationsApi.list(showInactive);
+      const res = await stationsApi.list(showInactive, selectedOperator.id);
       if (res.success) {
         setStations(res.data || []);
       }
@@ -262,7 +268,7 @@ export default function Stations() {
                     <PaperAirplaneIcon className="h-4 w-4" />
                     <span>{station._count?.aircraft || 0} aircraft</span>
                   </div>
-                  <span className="text-gray-500">{station.timezone.split('/')[1]}</span>
+                  <span className="text-gray-500">{station.timezone}</span>
                 </div>
               </div>
 

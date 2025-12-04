@@ -5,7 +5,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { body, param, validationResult } from 'express-validator';
+import { body, param, query, validationResult } from 'express-validator';
 import prisma from '../config/database.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 
@@ -17,51 +17,75 @@ router.use(authenticateToken);
 /**
  * GET /api/stations - List all stations
  */
-router.get('/', async (req: Request, res: Response) => {
-  try {
-    const includeInactive = req.query.includeInactive === 'true';
-    const whereClause: any = {};
-    if (!includeInactive) {
-      whereClause.isActive = true;
-    }
+router.get(
+  '/',
+  query('operatorId').optional().isInt(),
+  async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const includeInactive = req.query.includeInactive === 'true';
+      const whereClause: any = {};
 
-    const stations = await prisma.station.findMany({
-      where: whereClause,
-      orderBy: { name: 'asc' },
-      include: {
-        _count: {
-          select: {
-            aircraft: true,
-            users: true,
-            flightsFrom: true,
+      if (!includeInactive) {
+        whereClause.isActive = true;
+      }
+
+      // Filter by operator
+      let operatorFilter: number | undefined;
+      if (req.query.operatorId) {
+        const requestedOperatorId = parseInt(req.query.operatorId as string);
+        if (user.operatorId && user.operatorId !== requestedOperatorId) {
+          res.status(403).json({ success: false, error: 'Access denied to this operator' });
+          return;
+        }
+        operatorFilter = requestedOperatorId;
+      } else if (user.operatorId) {
+        operatorFilter = user.operatorId;
+      }
+
+      if (operatorFilter) {
+        whereClause.operatorId = operatorFilter;
+      }
+
+      const stations = await prisma.station.findMany({
+        where: whereClause,
+        orderBy: { name: 'asc' },
+        include: {
+          _count: {
+            select: {
+              aircraft: true,
+              users: true,
+              flightsFrom: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    res.json({
-      success: true,
-      data: stations.map(s => ({
-        id: s.id,
-        code: s.code,
-        name: s.name,
-        icao: s.icao,
-        timezone: s.timezone,
-        isActive: s.isActive,
-        isMainBase: s.isMainBase,
-        address: s.address,
-        phone: s.phone,
-        notes: s.notes,
-        aircraftCount: s._count.aircraft,
-        userCount: s._count.users,
-        flightCount: s._count.flightsFrom,
-      })),
-    });
-  } catch (error) {
-    console.error('Error fetching stations:', error);
-    res.status(500).json({ success: false, error: 'Failed to fetch stations' });
+      res.json({
+        success: true,
+        data: stations.map(s => ({
+          id: s.id,
+          code: s.code,
+          name: s.name,
+          icao: s.icao,
+          timezone: s.timezone,
+          isActive: s.isActive,
+          isMainBase: s.isMainBase,
+          address: s.address,
+          phone: s.phone,
+          notes: s.notes,
+          operatorId: s.operatorId,
+          aircraftCount: s._count.aircraft,
+          userCount: s._count.users,
+          flightCount: s._count.flightsFrom,
+        })),
+      });
+    } catch (error) {
+      console.error('Error fetching stations:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch stations' });
+    }
   }
-});
+);
 
 /**
  * GET /api/stations/:id - Get station details
