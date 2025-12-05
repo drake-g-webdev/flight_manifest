@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
@@ -12,9 +12,28 @@ import {
   ExclamationTriangleIcon,
   XCircleIcon,
   ScaleIcon,
+  MapPinIcon,
 } from '@heroicons/react/24/outline';
 import { flightsApi, manifestsApi } from '../services/api';
-import type { FlightDetail as FlightDetailType } from '../types';
+import type { FlightDetail as FlightDetailType, RouteLeg, Passenger, Freight, Mail } from '../types';
+import RouteLegsTimeline from '../components/RouteLegsTimeline';
+
+/**
+ * Helper to determine which leg an item exits
+ */
+function getItemExitLeg(
+  destination: string,
+  legNumber: number | null,
+  legs: RouteLeg[]
+): number {
+  if (legNumber !== null) {
+    return legNumber;
+  }
+  const matchingLeg = legs.find(
+    (leg) => leg.to.toLowerCase() === destination.toLowerCase()
+  );
+  return matchingLeg?.leg || legs.length;
+}
 
 export default function FlightDetail() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +41,66 @@ export default function FlightDetail() {
   const [flight, setFlight] = useState<FlightDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [selectedLeg, setSelectedLeg] = useState<number | null>(null);
+
+  // Calculate filtered items based on selected leg
+  const filteredItems = useMemo(() => {
+    if (!flight) return { passengers: [], freight: [], mail: [] };
+
+    const legs = flight.route;
+
+    if (selectedLeg === null) {
+      return {
+        passengers: flight.passengers,
+        freight: flight.freight,
+        mail: flight.mail,
+      };
+    }
+
+    return {
+      passengers: flight.passengers.filter(
+        (p) => getItemExitLeg(p.destination, p.legNumber, legs) === selectedLeg
+      ),
+      freight: flight.freight.filter(
+        (f) => getItemExitLeg(f.destination, f.legNumber, legs) === selectedLeg
+      ),
+      mail: flight.mail.filter(
+        (m) => getItemExitLeg(m.village, m.legNumber, legs) === selectedLeg
+      ),
+    };
+  }, [flight, selectedLeg]);
+
+  // Group items by leg for display
+  const itemsByLeg = useMemo(() => {
+    if (!flight) return new Map<number, { passengers: Passenger[]; freight: Freight[]; mail: Mail[] }>();
+
+    const legs = flight.route;
+    const grouped = new Map<number, { passengers: Passenger[]; freight: Freight[]; mail: Mail[] }>();
+
+    legs.forEach((leg) => {
+      grouped.set(leg.leg, { passengers: [], freight: [], mail: [] });
+    });
+
+    flight.passengers.forEach((p) => {
+      const exitLeg = getItemExitLeg(p.destination, p.legNumber, legs);
+      const group = grouped.get(exitLeg);
+      if (group) group.passengers.push(p);
+    });
+
+    flight.freight.forEach((f) => {
+      const exitLeg = getItemExitLeg(f.destination, f.legNumber, legs);
+      const group = grouped.get(exitLeg);
+      if (group) group.freight.push(f);
+    });
+
+    flight.mail.forEach((m) => {
+      const exitLeg = getItemExitLeg(m.village, m.legNumber, legs);
+      const group = grouped.get(exitLeg);
+      if (group) group.mail.push(m);
+    });
+
+    return grouped;
+  }, [flight]);
 
   useEffect(() => {
     if (id) {
@@ -144,31 +223,55 @@ export default function FlightDetail() {
               </div>
             </div>
 
-            {/* Route */}
+            {/* Route - simple display */}
             <div className="mt-4">
               <label className="text-sm text-gray-500">Route</label>
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <span className="font-medium">{flight.origin}</span>
                 {flight.route.map((leg, idx) => (
                   <span key={idx} className="flex items-center gap-2">
                     <span className="text-gray-400">→</span>
                     <span className="font-medium">{leg.to}</span>
-                    <span className="text-sm text-gray-500">({leg.eta})</span>
+                    {leg.eta && <span className="text-sm text-gray-500">({leg.eta})</span>}
                   </span>
                 ))}
               </div>
             </div>
           </div>
 
+          {/* Route Legs Timeline - for multi-leg flights */}
+          {flight.route.length > 1 && (
+            <RouteLegsTimeline
+              origin={flight.origin}
+              legs={flight.route}
+              legWeightBalance={flight.legWeightBalance}
+              passengers={flight.passengers}
+              freight={flight.freight}
+              mail={flight.mail}
+              selectedLeg={selectedLeg}
+              onSelectLeg={setSelectedLeg}
+            />
+          )}
+
           {/* Passengers */}
           <div className="card">
             <div className="flex items-center gap-2 p-4 border-b">
               <UserGroupIcon className="h-5 w-5 text-gray-400" />
               <h2 className="font-semibold">Passengers</h2>
-              <span className="ml-auto text-sm text-gray-500">{flight.passengers.length} / {flight.aircraft.seats}</span>
+              {selectedLeg !== null && (
+                <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded">
+                  Leg {selectedLeg}: {flight.route.find(l => l.leg === selectedLeg)?.to}
+                </span>
+              )}
+              <span className="ml-auto text-sm text-gray-500">
+                {filteredItems.passengers.length}
+                {selectedLeg !== null && ` of ${flight.passengers.length}`} / {flight.aircraft.seats}
+              </span>
             </div>
-            {flight.passengers.length === 0 ? (
-              <p className="p-4 text-gray-500">No passengers assigned</p>
+            {filteredItems.passengers.length === 0 ? (
+              <p className="p-4 text-gray-500">
+                {selectedLeg !== null ? 'No passengers for this leg' : 'No passengers assigned'}
+              </p>
             ) : (
               <table className="w-full">
                 <thead className="bg-gray-50">
@@ -178,31 +281,46 @@ export default function FlightDetail() {
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Weight</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Bags</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Destination</th>
+                    {flight.route.length > 1 && (
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Exit Leg</th>
+                    )}
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Priority</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {flight.passengers.map(pax => (
-                    <tr key={pax.id}>
-                      <td className="px-4 py-2 text-sm">{pax.seatNumber || '-'}</td>
-                      <td className="px-4 py-2 text-sm font-medium">{pax.name}</td>
-                      <td className="px-4 py-2 text-sm">
-                        {pax.weightKg || 88} kg
-                        {pax.standardWeightUsed && <span className="text-xs text-gray-400 ml-1">(std)</span>}
-                      </td>
-                      <td className="px-4 py-2 text-sm">{pax.bagsKg} kg</td>
-                      <td className="px-4 py-2 text-sm">{pax.destination}</td>
-                      <td className="px-4 py-2 text-sm">
-                        <span className={clsx({
-                          'priority-medical': pax.priority === 'MEDICAL',
-                          'priority-evac': pax.priority === 'EVAC',
-                          'priority-first_class': pax.priority === 'FIRST_CLASS',
-                        })}>
-                          {pax.priority}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredItems.passengers.map(pax => {
+                    const exitLeg = getItemExitLeg(pax.destination, pax.legNumber, flight.route);
+                    const legInfo = flight.route.find(l => l.leg === exitLeg);
+                    return (
+                      <tr key={pax.id}>
+                        <td className="px-4 py-2 text-sm">{pax.seatNumber || '-'}</td>
+                        <td className="px-4 py-2 text-sm font-medium">{pax.name}</td>
+                        <td className="px-4 py-2 text-sm">
+                          {pax.weightKg || 88} kg
+                          {pax.standardWeightUsed && <span className="text-xs text-gray-400 ml-1">(std)</span>}
+                        </td>
+                        <td className="px-4 py-2 text-sm">{pax.bagsKg} kg</td>
+                        <td className="px-4 py-2 text-sm">{pax.destination}</td>
+                        {flight.route.length > 1 && (
+                          <td className="px-4 py-2 text-sm">
+                            <span className="inline-flex items-center gap-1 text-xs bg-gray-100 px-1.5 py-0.5 rounded">
+                              <MapPinIcon className="h-3 w-3" />
+                              {exitLeg}: {legInfo?.to}
+                            </span>
+                          </td>
+                        )}
+                        <td className="px-4 py-2 text-sm">
+                          <span className={clsx({
+                            'priority-medical': pax.priority === 'MEDICAL',
+                            'priority-evac': pax.priority === 'EVAC',
+                            'priority-first_class': pax.priority === 'FIRST_CLASS',
+                          })}>
+                            {pax.priority}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -213,10 +331,20 @@ export default function FlightDetail() {
             <div className="flex items-center gap-2 p-4 border-b">
               <TruckIcon className="h-5 w-5 text-gray-400" />
               <h2 className="font-semibold">Freight</h2>
-              <span className="ml-auto text-sm text-gray-500">{flight.freight.length} items</span>
+              {selectedLeg !== null && (
+                <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded">
+                  Leg {selectedLeg}: {flight.route.find(l => l.leg === selectedLeg)?.to}
+                </span>
+              )}
+              <span className="ml-auto text-sm text-gray-500">
+                {filteredItems.freight.length}
+                {selectedLeg !== null && ` of ${flight.freight.length}`} items
+              </span>
             </div>
-            {flight.freight.length === 0 ? (
-              <p className="p-4 text-gray-500">No freight assigned</p>
+            {filteredItems.freight.length === 0 ? (
+              <p className="p-4 text-gray-500">
+                {selectedLeg !== null ? 'No freight for this leg' : 'No freight assigned'}
+              </p>
             ) : (
               <table className="w-full">
                 <thead className="bg-gray-50">
@@ -225,25 +353,40 @@ export default function FlightDetail() {
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Description</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Weight</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Destination</th>
+                    {flight.route.length > 1 && (
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Unload Leg</th>
+                    )}
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Compartment</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Priority</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {flight.freight.map(item => (
-                    <tr key={item.id}>
-                      <td className="px-4 py-2 text-sm font-medium">{item.waybill || '-'}</td>
-                      <td className="px-4 py-2 text-sm">{item.description || '-'}</td>
-                      <td className="px-4 py-2 text-sm">{item.weightKg} kg</td>
-                      <td className="px-4 py-2 text-sm">{item.destination}</td>
-                      <td className="px-4 py-2 text-sm">{item.compartment || '-'}</td>
-                      <td className="px-4 py-2 text-sm">
-                        <span className={clsx({ 'priority-bypass': item.priority === 'BYPASS' })}>
-                          {item.priority}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredItems.freight.map(item => {
+                    const exitLeg = getItemExitLeg(item.destination, item.legNumber, flight.route);
+                    const legInfo = flight.route.find(l => l.leg === exitLeg);
+                    return (
+                      <tr key={item.id}>
+                        <td className="px-4 py-2 text-sm font-medium">{item.waybill || '-'}</td>
+                        <td className="px-4 py-2 text-sm">{item.description || '-'}</td>
+                        <td className="px-4 py-2 text-sm">{item.weightKg} kg</td>
+                        <td className="px-4 py-2 text-sm">{item.destination}</td>
+                        {flight.route.length > 1 && (
+                          <td className="px-4 py-2 text-sm">
+                            <span className="inline-flex items-center gap-1 text-xs bg-gray-100 px-1.5 py-0.5 rounded">
+                              <MapPinIcon className="h-3 w-3" />
+                              {exitLeg}: {legInfo?.to}
+                            </span>
+                          </td>
+                        )}
+                        <td className="px-4 py-2 text-sm">{item.compartment || '-'}</td>
+                        <td className="px-4 py-2 text-sm">
+                          <span className={clsx({ 'priority-bypass': item.priority === 'BYPASS' })}>
+                            {item.priority}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -254,33 +397,58 @@ export default function FlightDetail() {
             <div className="flex items-center gap-2 p-4 border-b">
               <EnvelopeIcon className="h-5 w-5 text-gray-400" />
               <h2 className="font-semibold">Mail</h2>
-              <span className="ml-auto text-sm text-gray-500">{flight.mail.length} bags</span>
+              {selectedLeg !== null && (
+                <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded">
+                  Leg {selectedLeg}: {flight.route.find(l => l.leg === selectedLeg)?.to}
+                </span>
+              )}
+              <span className="ml-auto text-sm text-gray-500">
+                {filteredItems.mail.length}
+                {selectedLeg !== null && ` of ${flight.mail.length}`} bags
+              </span>
             </div>
-            {flight.mail.length === 0 ? (
-              <p className="p-4 text-gray-500">No mail assigned</p>
+            {filteredItems.mail.length === 0 ? (
+              <p className="p-4 text-gray-500">
+                {selectedLeg !== null ? 'No mail for this leg' : 'No mail assigned'}
+              </p>
             ) : (
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Village</th>
+                    {flight.route.length > 1 && (
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Delivery Leg</th>
+                    )}
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Pounds</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Weight (kg)</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Priority</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {flight.mail.map(item => (
-                    <tr key={item.id}>
-                      <td className="px-4 py-2 text-sm font-medium">{item.village}</td>
-                      <td className="px-4 py-2 text-sm">{item.pounds} lbs</td>
-                      <td className="px-4 py-2 text-sm">{item.weightKg.toFixed(1)} kg</td>
-                      <td className="px-4 py-2 text-sm">
-                        <span className={clsx({ 'priority-bypass': item.priority === 'BYPASS' })}>
-                          {item.priority}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredItems.mail.map(item => {
+                    const exitLeg = getItemExitLeg(item.village, item.legNumber, flight.route);
+                    const legInfo = flight.route.find(l => l.leg === exitLeg);
+                    return (
+                      <tr key={item.id}>
+                        <td className="px-4 py-2 text-sm font-medium">{item.village}</td>
+                        {flight.route.length > 1 && (
+                          <td className="px-4 py-2 text-sm">
+                            <span className="inline-flex items-center gap-1 text-xs bg-gray-100 px-1.5 py-0.5 rounded">
+                              <MapPinIcon className="h-3 w-3" />
+                              {exitLeg}: {legInfo?.to}
+                            </span>
+                          </td>
+                        )}
+                        <td className="px-4 py-2 text-sm">{item.pounds} lbs</td>
+                        <td className="px-4 py-2 text-sm">{item.weightKg.toFixed(1)} kg</td>
+                        <td className="px-4 py-2 text-sm">
+                          <span className={clsx({ 'priority-bypass': item.priority === 'BYPASS' })}>
+                            {item.priority}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

@@ -15,6 +15,8 @@ import type {
   WeightItem,
   SeatConfig,
   BaggageCompartment,
+  LegWBResult,
+  RouteLeg,
 } from '../types/index.js';
 
 const STANDARD_PASSENGER_WEIGHT_KG = parseFloat(process.env.STANDARD_ADULT_WEIGHT_KG || '88');
@@ -401,21 +403,58 @@ function findBestCompartment(
 }
 
 /**
+ * Determine which leg an item exits based on legNumber or destination matching
+ */
+function getItemExitLeg(
+  destination: string,
+  legNumber: number | null | undefined,
+  legs: RouteLeg[]
+): number {
+  // If explicit legNumber is set, use it
+  if (legNumber !== null && legNumber !== undefined) {
+    return legNumber;
+  }
+
+  // Otherwise, match by destination name
+  const matchingLeg = legs.find(leg =>
+    leg.to.toLowerCase() === destination.toLowerCase()
+  );
+
+  return matchingLeg?.leg || legs.length; // Default to final leg if no match
+}
+
+/**
  * Calculate W&B for multiple legs (multi-stop flights)
- * Returns W&B at each leg's takeoff point
+ * Returns detailed W&B at each leg's takeoff point with offload information
  */
 export function calculateMultiLegWB(
   input: WBCalculationInput,
-  legs: { leg: number; to: string }[]
-): { leg: number; destination: string; wb: WBResult }[] {
-  const results: { leg: number; destination: string; wb: WBResult }[] = [];
+  legs: RouteLeg[]
+): LegWBResult[] {
+  const results: LegWBResult[] = [];
 
-  let remainingPassengers = [...input.passengers];
-  let remainingFreight = [...input.freight];
-  let remainingMail = [...input.mail];
+  // Annotate each item with its exit leg
+  const passengersWithLeg = input.passengers.map(p => ({
+    ...p,
+    exitLeg: getItemExitLeg(p.destination, p.legNumber, legs),
+  }));
+
+  const freightWithLeg = input.freight.map(f => ({
+    ...f,
+    exitLeg: getItemExitLeg(f.destination, f.legNumber, legs),
+  }));
+
+  const mailWithLeg = input.mail.map(m => ({
+    ...m,
+    exitLeg: getItemExitLeg(m.village, m.legNumber, legs),
+  }));
+
+  let remainingPassengers = [...passengersWithLeg];
+  let remainingFreight = [...freightWithLeg];
+  let remainingMail = [...mailWithLeg];
 
   for (const leg of legs) {
-    // Calculate W&B with current load
+    // Calculate W&B with current load (before offloading at this leg)
     const legWB = calculateWeightBalance({
       ...input,
       passengers: remainingPassengers,
@@ -423,19 +462,46 @@ export function calculateMultiLegWB(
       mail: remainingMail,
     });
 
+    // Find items that will be offloaded at this leg
+    const offloadPassengers = remainingPassengers.filter(p => p.exitLeg === leg.leg);
+    const offloadFreight = remainingFreight.filter(f => f.exitLeg === leg.leg);
+    const offloadMail = remainingMail.filter(m => m.exitLeg === leg.leg);
+
     results.push({
       leg: leg.leg,
       destination: leg.to,
-      wb: legWB,
+      takeoffWB: legWB,
+      passengerCount: remainingPassengers.length,
+      freightCount: remainingFreight.length,
+      mailCount: remainingMail.length,
+      offloadPassengerIds: offloadPassengers.map(p => p.id),
+      offloadFreightIds: offloadFreight.map(f => f.id),
+      offloadMailIds: offloadMail.map(m => m.id),
     });
 
-    // Remove items destined for this leg
-    remainingPassengers = remainingPassengers.filter(p => p.destination !== leg.to);
-    remainingFreight = remainingFreight.filter(f => f.destination !== leg.to);
-    remainingMail = remainingMail.filter(m => m.village !== leg.to);
+    // Remove offloaded items for next leg calculation
+    remainingPassengers = remainingPassengers.filter(p => p.exitLeg !== leg.leg);
+    remainingFreight = remainingFreight.filter(f => f.exitLeg !== leg.leg);
+    remainingMail = remainingMail.filter(m => m.exitLeg !== leg.leg);
   }
 
   return results;
+}
+
+/**
+ * Calculate W&B for multiple legs (legacy format - for backward compatibility)
+ * @deprecated Use calculateMultiLegWB instead
+ */
+export function calculateMultiLegWBLegacy(
+  input: WBCalculationInput,
+  legs: { leg: number; to: string }[]
+): { leg: number; destination: string; wb: WBResult }[] {
+  const legResults = calculateMultiLegWB(input, legs as RouteLeg[]);
+  return legResults.map(r => ({
+    leg: r.leg,
+    destination: r.destination,
+    wb: r.takeoffWB,
+  }));
 }
 
 /**

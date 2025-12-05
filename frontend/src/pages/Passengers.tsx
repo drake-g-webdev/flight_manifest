@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
@@ -9,9 +9,10 @@ import {
   CameraIcon,
   CheckCircleIcon,
   DocumentIcon,
+  MapPinIcon,
 } from '@heroicons/react/24/outline';
 import { passengersApi, flightsApi } from '../services/api';
-import type { Passenger, FlightSummary } from '../types';
+import type { Passenger, FlightSummary, RouteLeg } from '../types';
 
 export default function Passengers() {
   const [passengers, setPassengers] = useState<Passenger[]>([]);
@@ -34,8 +35,16 @@ export default function Passengers() {
     bagsKg: '0',
     priority: 'NORMAL',
     flightId: '',
+    legNumber: '', // Which leg passenger exits (empty = auto-match by destination)
     notes: '',
   });
+
+  // Get route legs for selected flight
+  const selectedFlightLegs = useMemo(() => {
+    if (!form.flightId) return [];
+    const flight = flights.find(f => f.id === parseInt(form.flightId));
+    return flight?.route || [];
+  }, [form.flightId, flights]);
 
   // Check-in form state
   const [checkInForm, setCheckInForm] = useState({
@@ -76,6 +85,7 @@ export default function Passengers() {
         bagsKg: parseFloat(form.bagsKg) || 0,
         priority: form.priority as 'NORMAL' | 'MEDICAL' | 'EVAC' | 'FIRST_CLASS',
         flightId: form.flightId ? parseInt(form.flightId) : undefined,
+        legNumber: form.legNumber ? parseInt(form.legNumber) : null, // null = auto-match
         notes: form.notes || undefined,
       };
 
@@ -117,6 +127,7 @@ export default function Passengers() {
       bagsKg: passenger.bagsKg.toString(),
       priority: passenger.priority,
       flightId: passenger.flightId?.toString() || '',
+      legNumber: passenger.legNumber?.toString() || '',
       notes: passenger.notes || '',
     });
     setShowModal(true);
@@ -133,6 +144,7 @@ export default function Passengers() {
       bagsKg: '0',
       priority: 'NORMAL',
       flightId: '',
+      legNumber: '',
       notes: '',
     });
   };
@@ -396,7 +408,7 @@ export default function Passengers() {
                   <label className="label">Assign to Flight</label>
                   <select
                     value={form.flightId}
-                    onChange={e => setForm({ ...form, flightId: e.target.value })}
+                    onChange={e => setForm({ ...form, flightId: e.target.value, legNumber: '' })}
                     className="input"
                   >
                     <option value="">Unassigned</option>
@@ -408,6 +420,32 @@ export default function Passengers() {
                   </select>
                 </div>
               </div>
+
+              {/* Leg selection - only show for multi-leg flights */}
+              {selectedFlightLegs.length > 1 && (
+                <div>
+                  <label className="label flex items-center gap-1">
+                    <MapPinIcon className="h-4 w-4" />
+                    Exit Leg
+                  </label>
+                  <select
+                    value={form.legNumber}
+                    onChange={e => setForm({ ...form, legNumber: e.target.value })}
+                    className="input"
+                  >
+                    <option value="">Auto-match by destination</option>
+                    {selectedFlightLegs.map(leg => (
+                      <option key={leg.leg} value={leg.leg}>
+                        Leg {leg.leg}: {leg.to}
+                        {leg.eta && ` (ETA: ${leg.eta})`}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Leave as "Auto" to match based on destination name
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="label">Notes</label>
                 <textarea

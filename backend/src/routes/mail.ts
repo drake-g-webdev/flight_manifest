@@ -137,6 +137,7 @@ router.post(
     body('pounds').isNumeric(),
     body('priority').optional().isIn(['BYPASS', 'PRIORITY', 'STANDARD']),
     body('assignedFlightId').optional().isInt(),
+    body('legNumber').optional({ nullable: true }).isInt(),
     body('operatorId').isInt(),
   ],
   async (req: Request, res: Response) => {
@@ -174,6 +175,7 @@ router.post(
       const mail = await prisma.mailManifest.create({
         data: {
           village: req.body.village,
+          legNumber: req.body.legNumber !== undefined ? req.body.legNumber : null,
           pounds: pounds,
           weightKg: weightKg,
           priority: req.body.priority || 'BYPASS', // Mail is bypass priority by default
@@ -239,6 +241,7 @@ router.put(
       const updateData: any = {};
 
       if (req.body.village) updateData.village = req.body.village;
+      if (req.body.legNumber !== undefined) updateData.legNumber = req.body.legNumber;
       if (req.body.pounds !== undefined) {
         const pounds = parseFloat(req.body.pounds);
         updateData.pounds = pounds;

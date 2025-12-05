@@ -207,6 +207,7 @@ model Passenger {
   standardWeightUsed Boolean         @default(true) @map("standard_weight_used")
   bagsKg             Decimal         @default(0) @map("bags_kg")
   destination        String
+  legNumber          Int?            @map("leg_number") // Which leg passenger exits (1, 2, 3...), null = auto-match by destination
   priority           PassengerPriority @default(NORMAL)
   seatNumber         Int?            @map("seat_number")
   flightId           Int?            @map("flight_id")
@@ -245,6 +246,7 @@ model Freight {
   description      String?
   weightKg         Decimal         @map("weight_kg")
   destination      String
+  legNumber        Int?            @map("leg_number") // Which leg freight is unloaded (1, 2, 3...), null = auto-match by destination
   volumeM3         Decimal?        @map("volume_m3")
   priority         FreightPriority @default(STANDARD)
   compartment      String?         // Which compartment it's assigned to
@@ -273,6 +275,7 @@ enum FreightPriority {
 model MailManifest {
   id               Int             @id @default(autoincrement())
   village          String
+  legNumber        Int?            @map("leg_number") // Which leg mail is delivered (1, 2, 3...), null = auto-match by village
   pounds           Decimal
   weightKg         Decimal         @map("weight_kg") // Converted from pounds
   priority         FreightPriority @default(BYPASS)

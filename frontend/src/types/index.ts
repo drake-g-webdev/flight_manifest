@@ -178,6 +178,19 @@ export interface WeightBalance {
   warnings: WBWarning[];
 }
 
+// Per-leg weight & balance result for multi-stop flights
+export interface LegWBResult {
+  leg: number;
+  destination: string;
+  takeoffWB: WeightBalance;
+  passengerCount: number;
+  freightCount: number;
+  mailCount: number;
+  offloadPassengerIds: number[];
+  offloadFreightIds: number[];
+  offloadMailIds: number[];
+}
+
 export interface FlightDetail {
   id: number;
   flightDate: string;
@@ -195,6 +208,7 @@ export interface FlightDetail {
   freight: Freight[];
   mail: Mail[];
   weightBalance: WeightBalance;
+  legWeightBalance?: LegWBResult[]; // Per-leg W&B for multi-stop flights
   latestManifest: Manifest | null;
 }
 
@@ -207,6 +221,7 @@ export interface Passenger {
   standardWeightUsed: boolean;
   bagsKg: number;
   destination: string;
+  legNumber: number | null; // Which leg passenger exits (1, 2, 3...), null = auto-match by destination
   priority: PassengerPriority;
   seatNumber: number | null;
   flightId: number | null;
@@ -228,6 +243,7 @@ export interface Freight {
   description: string | null;
   weightKg: number;
   destination: string;
+  legNumber: number | null; // Which leg freight is unloaded (1, 2, 3...), null = auto-match by destination
   volumeM3: number | null;
   priority: FreightPriority;
   compartment: string | null;
@@ -243,6 +259,7 @@ export interface Freight {
 export interface Mail {
   id: number;
   village: string;
+  legNumber: number | null; // Which leg mail is delivered (1, 2, 3...), null = auto-match by village
   pounds: number;
   weightKg: number;
   priority: FreightPriority;

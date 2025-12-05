@@ -181,6 +181,7 @@ router.post(
     body('bagsKg').optional().isNumeric(),
     body('priority').optional().isIn(['NORMAL', 'MEDICAL', 'EVAC', 'FIRST_CLASS']),
     body('flightId').optional().isInt(),
+    body('legNumber').optional({ nullable: true }).isInt(),
     body('operatorId').isInt(),
   ],
   async (req: Request, res: Response) => {
@@ -222,6 +223,7 @@ router.post(
           standardWeightUsed: !hasActualWeight,
           bagsKg: req.body.bagsKg || 0,
           destination: req.body.destination,
+          legNumber: req.body.legNumber !== undefined ? req.body.legNumber : null,
           priority: req.body.priority || 'NORMAL',
           seatNumber: req.body.seatNumber,
           flightId: req.body.flightId,
@@ -294,6 +296,7 @@ router.put(
       }
       if (req.body.bagsKg !== undefined) updateData.bagsKg = req.body.bagsKg;
       if (req.body.destination) updateData.destination = req.body.destination;
+      if (req.body.legNumber !== undefined) updateData.legNumber = req.body.legNumber;
       if (req.body.priority) updateData.priority = req.body.priority;
       if (req.body.seatNumber !== undefined) updateData.seatNumber = req.body.seatNumber;
       if (req.body.notes !== undefined) updateData.notes = req.body.notes;

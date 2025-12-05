@@ -6,8 +6,8 @@ import { Router, Request, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import prisma from '../config/database.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
-import { calculateWeightBalance } from '../services/weightBalance.js';
-import type { AircraftConfig, RouteLeg } from '../types/index.js';
+import { calculateWeightBalance, calculateMultiLegWB } from '../services/weightBalance.js';
+import type { AircraftConfig, RouteLeg, LegWBResult } from '../types/index.js';
 
 const router = Router();
 
@@ -203,47 +203,76 @@ router.get('/:id', param('id').isInt(), async (req: Request, res: Response) => {
       seats: flight.aircraft.seats,
     };
 
+    // Build passenger data with legNumber
+    const passengerData = flight.passengers.map(p => ({
+      id: p.id,
+      bookingRef: p.bookingRef,
+      name: p.name,
+      phone: p.phone,
+      weightKg: p.weightKg ? Number(p.weightKg) : null,
+      standardWeightUsed: p.standardWeightUsed,
+      bagsKg: Number(p.bagsKg),
+      destination: p.destination,
+      legNumber: (p as any).legNumber || null,
+      priority: p.priority as any,
+      seatNumber: p.seatNumber,
+      flightId: p.flightId,
+      notes: p.notes,
+    }));
+
+    // Build freight data with legNumber
+    const freightData = flight.freight.map(f => ({
+      id: f.id,
+      waybill: f.waybill,
+      description: f.description,
+      weightKg: Number(f.weightKg),
+      destination: f.destination,
+      legNumber: (f as any).legNumber || null,
+      volumeM3: f.volumeM3 ? Number(f.volumeM3) : null,
+      priority: f.priority as any,
+      compartment: f.compartment,
+      assignedFlightId: f.assignedFlightId,
+      notes: f.notes,
+    }));
+
+    // Build mail data with legNumber
+    const mailData = flight.mail.map(m => ({
+      id: m.id,
+      village: m.village,
+      legNumber: (m as any).legNumber || null,
+      pounds: Number(m.pounds),
+      weightKg: Number(m.weightKg),
+      priority: m.priority as any,
+      assignedFlightId: m.assignedFlightId,
+      notes: m.notes,
+    }));
+
     // Calculate full W&B
     const wb = calculateWeightBalance({
       aircraft: aircraftConfig,
       pilotWeightKg: Number(flight.pilotWeightKg) || Number(flight.aircraft.pilotStandardWeightKg),
       fuelWeightKg: Number(flight.fuelWeightKg) || 0,
-      passengers: flight.passengers.map(p => ({
-        id: p.id,
-        bookingRef: p.bookingRef,
-        name: p.name,
-        phone: p.phone,
-        weightKg: p.weightKg ? Number(p.weightKg) : null,
-        standardWeightUsed: p.standardWeightUsed,
-        bagsKg: Number(p.bagsKg),
-        destination: p.destination,
-        priority: p.priority as any,
-        seatNumber: p.seatNumber,
-        flightId: p.flightId,
-        notes: p.notes,
-      })),
-      freight: flight.freight.map(f => ({
-        id: f.id,
-        waybill: f.waybill,
-        description: f.description,
-        weightKg: Number(f.weightKg),
-        destination: f.destination,
-        volumeM3: f.volumeM3 ? Number(f.volumeM3) : null,
-        priority: f.priority as any,
-        compartment: f.compartment,
-        assignedFlightId: f.assignedFlightId,
-        notes: f.notes,
-      })),
-      mail: flight.mail.map(m => ({
-        id: m.id,
-        village: m.village,
-        pounds: Number(m.pounds),
-        weightKg: Number(m.weightKg),
-        priority: m.priority as any,
-        assignedFlightId: m.assignedFlightId,
-        notes: m.notes,
-      })),
+      passengers: passengerData,
+      freight: freightData,
+      mail: mailData,
     });
+
+    // Calculate per-leg W&B for multi-leg flights
+    const routeLegs = flight.route as RouteLeg[];
+    let legWB: LegWBResult[] = [];
+    if (routeLegs && routeLegs.length > 1) {
+      legWB = calculateMultiLegWB(
+        {
+          aircraft: aircraftConfig,
+          pilotWeightKg: Number(flight.pilotWeightKg) || Number(flight.aircraft.pilotStandardWeightKg),
+          fuelWeightKg: Number(flight.fuelWeightKg) || 0,
+          passengers: passengerData,
+          freight: freightData,
+          mail: mailData,
+        },
+        routeLegs
+      );
+    }
 
     res.json({
       success: true,
@@ -264,18 +293,22 @@ router.get('/:id', param('id').isInt(), async (req: Request, res: Response) => {
           ...p,
           weightKg: p.weightKg ? Number(p.weightKg) : null,
           bagsKg: Number(p.bagsKg),
+          legNumber: (p as any).legNumber || null,
         })),
         freight: flight.freight.map(f => ({
           ...f,
           weightKg: Number(f.weightKg),
           volumeM3: f.volumeM3 ? Number(f.volumeM3) : null,
+          legNumber: (f as any).legNumber || null,
         })),
         mail: flight.mail.map(m => ({
           ...m,
           pounds: Number(m.pounds),
           weightKg: Number(m.weightKg),
+          legNumber: (m as any).legNumber || null,
         })),
         weightBalance: wb,
+        legWeightBalance: legWB, // Per-leg W&B for multi-leg flights
         latestManifest: flight.manifests[0] || null,
       },
     });

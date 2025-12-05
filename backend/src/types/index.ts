@@ -75,6 +75,7 @@ export interface PassengerData {
   standardWeightUsed: boolean;
   bagsKg: number;
   destination: string;
+  legNumber: number | null; // Which leg passenger exits (1, 2, 3...), null = auto-match by destination
   priority: PassengerPriority;
   seatNumber: number | null;
   flightId: number | null;
@@ -91,6 +92,7 @@ export interface FreightData {
   description: string | null;
   weightKg: number;
   destination: string;
+  legNumber: number | null; // Which leg freight is unloaded (1, 2, 3...), null = auto-match by destination
   volumeM3: number | null;
   priority: FreightPriority;
   compartment: string | null;
@@ -103,6 +105,7 @@ export interface FreightData {
 export interface MailData {
   id: number;
   village: string;
+  legNumber: number | null; // Which leg mail is delivered (1, 2, 3...), null = auto-match by village
   pounds: number;
   weightKg: number;
   priority: FreightPriority;
@@ -121,6 +124,7 @@ export interface WeightItem {
   moment: number;
   compartment?: string;
   destination?: string;
+  legNumber?: number; // Which leg this item exits
 }
 
 export interface WBResult {
@@ -145,6 +149,19 @@ export interface WBWarning {
   type: 'error' | 'warning' | 'info';
   code: string;
   message: string;
+}
+
+// Per-leg weight & balance result
+export interface LegWBResult {
+  leg: number;
+  destination: string;
+  takeoffWB: WBResult; // W&B at takeoff for this leg
+  passengerCount: number;
+  freightCount: number;
+  mailCount: number;
+  offloadPassengerIds: number[]; // Passengers getting off at this leg
+  offloadFreightIds: number[]; // Freight being unloaded at this leg
+  offloadMailIds: number[]; // Mail being delivered at this leg
 }
 
 // ---------- Assignment & Optimization Types ----------

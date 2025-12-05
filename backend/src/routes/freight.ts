@@ -141,6 +141,7 @@ router.post(
     body('destination').isString().notEmpty(),
     body('priority').optional().isIn(['BYPASS', 'PRIORITY', 'STANDARD']),
     body('assignedFlightId').optional().isInt(),
+    body('legNumber').optional({ nullable: true }).isInt(),
     body('operatorId').isInt(),
   ],
   async (req: Request, res: Response) => {
@@ -177,6 +178,7 @@ router.post(
           description: req.body.description,
           weightKg: req.body.weightKg,
           destination: req.body.destination,
+          legNumber: req.body.legNumber !== undefined ? req.body.legNumber : null,
           volumeM3: req.body.volumeM3,
           priority: req.body.priority || 'STANDARD',
           compartment: req.body.compartment,
@@ -245,6 +247,7 @@ router.put(
       if (req.body.description !== undefined) updateData.description = req.body.description;
       if (req.body.weightKg !== undefined) updateData.weightKg = req.body.weightKg;
       if (req.body.destination) updateData.destination = req.body.destination;
+      if (req.body.legNumber !== undefined) updateData.legNumber = req.body.legNumber;
       if (req.body.volumeM3 !== undefined) updateData.volumeM3 = req.body.volumeM3;
       if (req.body.priority) updateData.priority = req.body.priority;
       if (req.body.compartment !== undefined) updateData.compartment = req.body.compartment;
